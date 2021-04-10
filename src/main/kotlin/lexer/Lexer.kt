@@ -11,6 +11,7 @@ class Lexer(private val input: String) {
     private val regexes = mutableMapOf(
         "[a-zA-Z_]+" to IDENTIFIER,
         "0|[1-9]([0-9]+)?" to NUMBER,
+        ":" to COLON,
         "-" to MINUS,
         "*" to MUL,
         "/" to DIV,
@@ -19,10 +20,13 @@ class Lexer(private val input: String) {
         "<" to LESS,
         "=" to EQUAL,
         "," to COMMA,
-        "{" to LPAREN,
-        "}" to RPAREN,
-        "(" to LBRACKET,
-        ")" to RBRACKET,
+        "{" to LBRACE,
+        "}" to RBRACE,
+        "(" to LPAREN,
+        ")" to RPAREN,
+        "[" to LBRACKET,
+        "]" to RBRACKET,
+        "?" to QUESTION,
         "+" to PLUS,
         "\n" to EOL
     )
@@ -52,7 +56,14 @@ class Lexer(private val input: String) {
             }
             if (bestMatch !== null) {
                 cur += maxPref
-                bestToken!!.value = bestMatch.value
+                val value = bestMatch.value
+                bestToken!!.value =
+                    when (bestToken.type) {
+                        IDENTIFIER -> value
+                        NUMBER -> value.toInt()
+                        else -> null
+                    }
+
                 res.add(bestToken)
                 if (bestToken.type == EOL) curLine++
             } else {
