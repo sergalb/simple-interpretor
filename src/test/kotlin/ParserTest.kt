@@ -157,6 +157,11 @@ class ParserTest {
     }
 
     @Test
+    fun leadingZeroes() {
+        provideThrowSyntaxExceptionTests("001", Parser::parseProgram)
+    }
+
+    @Test
     fun ifWithoutElsePartShouldFail() {
         provideThrowSyntaxExceptionTests("[1]?{2}", Parser::expression)
     }
