@@ -1,6 +1,8 @@
 package parser
 
 import context.*
+import exceptions.CompileTimeException
+import exceptions.SyntaxException
 import lexer.Token
 import lexer.Type
 import lexer.Type.*
@@ -8,38 +10,39 @@ import lexer.Type.*
 
 class Parser(private val tokens: List<Token>) {
     private var current = 0
-
+    private val parameterVariables: MutableMap<String, MutableMap<String, ParameterVariableContext>> = HashMap()
+    private var curFunctionName = ""
     fun parseProgram(): ProgramContext {
         val res = ProgramContext(
             functionsDefinition(),
             expression()
         )
-        if (tokens[current].type != EOF) throw SyntaxException()
+        checkCurrentType(EOF)
         return res
     }
 
 
-    private fun functionsDefinition(): List<FunctionContext> {
+    fun functionsDefinition(): List<FunctionDefinitionContext> {
         val token = tokens[current]
         return when (token.type) {
             IDENTIFIER -> {
-//                checkNextTypes(LPAREN)
+                curFunctionName = token.value as String
                 next()
-                if (tokens[current].type != LPAREN) {
-                    throw SyntaxException()
-                }
+                checkCurrentType(LPAREN)
                 if (tokens[current + 1].type != IDENTIFIER) {
                     current--
                     return emptyList()
                 }
+                if (parameterVariables.containsKey(curFunctionName)) throw CompileTimeException("DUPLICATE FUNCTION", curFunctionName, token.line)
                 next()
                 val params = parameters()
                 checkNextTypes(RPAREN, EQUAL, LBRACE)
                 val function =
-                    FunctionContext(
-                        token.value as String,
+                    FunctionDefinitionContext(
+                        curFunctionName,
                         params,
-                        expression()
+                        expression(),
+                        token.line
                     )
                 checkNextTypes(RBRACE, EOL)
                 functionsDefinition().plusElement(function)
@@ -48,26 +51,38 @@ class Parser(private val tokens: List<Token>) {
         }
     }
 
-    private fun parameters(): List<IdentifierContext> {
+    fun parameters(): List<ParameterVariableContext> {
         var token = next()
-        val res = mutableListOf<IdentifierContext>()
+        val res = mutableListOf<ParameterVariableContext>()
         while (true) {
             if (token.type != IDENTIFIER) throw SyntaxException()
-            res.add(IdentifierContext((token.value) as String))
-            if (next().type != COMMA) {
+            val name = token.value as String
+            val variableContext = ParameterVariableContext(name, line = token.line)
+            val function = parameterVariables[curFunctionName]
+            if (function != null) {
+                val old = function.putIfAbsent(name, variableContext)
+                if (old != null) {
+                    throw CompileTimeException("DUPLICATE PARAMETER NAME", old.name, old.line)
+                }
+            } else {
+                parameterVariables[curFunctionName] = mutableMapOf(Pair(name, variableContext))
+            }
+            res.add(variableContext)
+            if (tokens[current].type != COMMA) {
                 break
             }
-            token = tokens[current]
+            next()
+            token = next()
         }
         return res
     }
 
 
-    private fun expression(): ExpressionContext {
+    fun expression(): ExpressionContext {
         val token = tokens[current]
         return when (token.type) {
             IDENTIFIER -> call()
-            NUMBER -> ConstantContext(next().value as Int)
+            NUMBER, MINUS -> unary()
             LPAREN -> {
                 next()
                 val res = addition()
@@ -84,29 +99,38 @@ class Parser(private val tokens: List<Token>) {
 
     }
 
-    private fun ifExpression(): IfContext {
+    fun ifExpression(): IfContext {
         val condition = expression()
         checkNextTypes(RBRACKET, QUESTION, LBRACE)
         val thenExpression = expression()
         checkNextTypes(RBRACE, COLON, LBRACE)
         val elseExpression = expression()
         checkNextTypes(RBRACE)
-        return IfContext(condition, thenExpression, elseExpression)
+        return IfContext(condition, thenExpression, elseExpression, condition.line)
     }
 
-    private fun call(): ExpressionContext {
+    fun call(): ExpressionContext {
         val token = next()
+        val name = token.value as String
         return if (tokens[current].type != LPAREN) {
-            IdentifierContext(token.value as String)
+            parameterVariables[curFunctionName]?.get(name)
+                ?: throw CompileTimeException("PARAMETER NOT FOUND", name, token.line)
         } else {
             next()
-            val res = CallContext(token.value as String, argumentList())
+            val arguments = argumentList()
+            val function = parameterVariables[name]
+            if (function != null && function.size != arguments.size) throw CompileTimeException(
+                "ARGUMENT NUMBER MISMATCH",
+                name,
+                token.line
+            )
+            val res = CallContext(name, arguments, token.line)
             checkNextTypes(RPAREN)
             res
         }
     }
 
-    private fun argumentList(): List<ExpressionContext> {
+    fun argumentList(): List<ExpressionContext> {
         val res = mutableListOf<ExpressionContext>()
         while (true) {
             res.add(expression())
@@ -118,27 +142,27 @@ class Parser(private val tokens: List<Token>) {
         return res
     }
 
-    private fun binaryExpression(nextLevel: Parser.() -> ExpressionContext, vararg operators: Type): ExpressionContext {
+    fun binaryExpression(nextLevel: Parser.() -> ExpressionContext, vararg operators: Type): ExpressionContext {
         var left = nextLevel()
         var operator = tokens[current].type
         while (operators.any { it == operator }) {
             next()
             val right = nextLevel()
-            left = BinaryExpressionContext(left, Operator.valueOf(operator.name), right)
+            left = BinaryExpressionContext(left, Operator.valueOf(operator.name), right, left.line)
             operator = tokens[current].type
         }
         return left
     }
 
-    private fun addition(): ExpressionContext =
+    fun addition(): ExpressionContext =
         binaryExpression({ multiplication() }, PLUS, MINUS)
 
 
-    private fun multiplication(): ExpressionContext =
+    fun multiplication(): ExpressionContext =
         binaryExpression({ mod() }, MUL, DIV)
 
 
-    private fun mod(): ExpressionContext {
+    fun mod(): ExpressionContext {
         return binaryExpression({ comparison() }, MOD)
     }
 
@@ -146,20 +170,25 @@ class Parser(private val tokens: List<Token>) {
         binaryExpression({ unary() }, LESS, GREATER, EQUAL)
 
 
-    private fun unary(): ExpressionContext {
+    fun unary(): ExpressionContext {
         var token = tokens[current]
         return when (token.type) {
             NUMBER -> {
                 next()
-                ConstantContext(token.value as Int)
+                ConstantContext(token.value as Int, token.line)
             }
             MINUS -> {
+                next()
                 token = next()
                 if (token.type != NUMBER) throw SyntaxException()
-                return ConstantContext(-(token.value as Int))
+                return ConstantContext(-(token.value as Int), token.line)
             }
             else -> expression()
         }
+    }
+
+    private fun checkCurrentType(type: Type) {
+        if (tokens[current].type != type) throw SyntaxException()
     }
 
     private fun checkNextTypes(vararg types: Type) {

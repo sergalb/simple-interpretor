@@ -1,4 +1,4 @@
-package parser
+package exceptions
 
 class SyntaxException(msg: String) : RuntimeException(
     "SYNTAX ERROR" +

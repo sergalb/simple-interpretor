@@ -24,6 +24,4 @@ enum class Type {
     EOF
 }
 
-data class Token(val type: Type, val line: Int, var value: Any? = null, val children: MutableList<Token> = ArrayList()) {
-    constructor(other: Token) : this(other.type, other.line, other.value, other.children)
-}
+data class Token(val type: Type, val line: Int, var value: Any? = null)

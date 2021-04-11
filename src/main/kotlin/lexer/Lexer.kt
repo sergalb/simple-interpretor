@@ -1,12 +1,13 @@
 package lexer
 
+import exceptions.SyntaxException
 import lexer.Type.*
 import java.util.regex.PatternSyntaxException
 import kotlin.text.Regex.Companion.escape
 
 class Lexer(private val input: String) {
     private var cur = 0
-    private var curLine = 0
+    private var curLine = 1
 
     private val regexes = mutableMapOf(
         "[a-zA-Z_]+" to IDENTIFIER,
@@ -67,7 +68,7 @@ class Lexer(private val input: String) {
                 res.add(bestToken)
                 if (bestToken.type == EOL) curLine++
             } else {
-                throw IllegalArgumentException("SYNTAX ERROR")
+                throw SyntaxException()
             }
         }
         res.add(Token(EOF, curLine))
